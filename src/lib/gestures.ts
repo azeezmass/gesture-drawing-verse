@@ -1,3 +1,4 @@
+
 // MediaPipe integration for hand tracking
 
 export type HandLandmark = {
@@ -18,25 +19,39 @@ export enum GestureType {
   CLEAR = 'clear',
 }
 
-// Previous landmark positions for smoothing
+// Previous landmark positions for advanced smoothing
 let previousLandmarks: HandLandmark[] = [];
-const smoothingFactor = 0.7; // Adjust between 0-1 (higher = more smoothing)
+let previousGesture: GestureType = GestureType.NONE;
+const smoothingFactor = 0.65; // More smoothing (higher value = more smoothing)
+let gestureDebounceTimer: number | null = null;
+let gestureDebounceDelay = 150; // ms
 
-// Apply smoothing to hand landmarks to reduce jitter
+// Enhanced smoothing with momentum consideration
 const smoothLandmarks = (landmarks: HandLandmark[]): HandLandmark[] => {
   if (previousLandmarks.length === 0 || previousLandmarks.length !== landmarks.length) {
-    // First frame or landmarks count changed, just use current landmarks
-    previousLandmarks = [...landmarks];
+    // First frame or landmarks count changed
+    previousLandmarks = JSON.parse(JSON.stringify(landmarks)); // Deep clone
     return landmarks;
   }
   
-  // Apply smoothing
+  // Apply advanced smoothing with velocity consideration
   const smoothedLandmarks = landmarks.map((landmark, i) => {
     const prev = previousLandmarks[i];
+    
+    // Calculate velocity-based smoothing
+    const dx = landmark.x - prev.x;
+    const dy = landmark.y - prev.y;
+    const dz = landmark.z - prev.z;
+    const velocity = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    
+    // Adjust smoothing factor based on velocity
+    // Less smoothing for fast movements to reduce lag
+    const dynSmoothing = Math.max(0.3, smoothingFactor - (velocity * 0.5));
+    
     return {
-      x: prev.x * smoothingFactor + landmark.x * (1 - smoothingFactor),
-      y: prev.y * smoothingFactor + landmark.y * (1 - smoothingFactor),
-      z: prev.z * smoothingFactor + landmark.z * (1 - smoothingFactor),
+      x: prev.x * dynSmoothing + landmark.x * (1 - dynSmoothing),
+      y: prev.y * dynSmoothing + landmark.y * (1 - dynSmoothing),
+      z: prev.z * dynSmoothing + landmark.z * (1 - dynSmoothing),
     };
   });
   
@@ -46,7 +61,7 @@ const smoothLandmarks = (landmarks: HandLandmark[]): HandLandmark[] => {
   return smoothedLandmarks;
 };
 
-// Detect drawing gesture based on hand landmarks with improved sensitivity
+// Detect drawing gesture with improved sensitivity and stability
 export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
   // If no landmarks, return NONE
   if (!landmarks || landmarks.length < 21) {
@@ -57,47 +72,80 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
     // Apply smoothing to reduce jitter
     const smoothedLandmarks = smoothLandmarks(landmarks);
     
-    // Check if index finger is extended and thumb is not
-    // Index finger tip is landmark 8, index finger MCP is landmark 5
-    // Thumb tip is landmark 4
+    // Get key landmark points for gesture detection
     const indexFingerTip = smoothedLandmarks[8];
     const indexFingerMCP = smoothedLandmarks[5];
+    const indexFingerPIP = smoothedLandmarks[6]; // Index finger PIP joint
     const thumbTip = smoothedLandmarks[4];
     const middleFingerTip = smoothedLandmarks[12];
+    const middleFingerMCP = smoothedLandmarks[9];
     const middleFingerPIP = smoothedLandmarks[10]; // Middle finger PIP joint
     
-    // Check if index finger is extended (tip is above MCP)
-    const isIndexExtended = indexFingerTip.y < indexFingerMCP.y - 0.05; // Added threshold
+    // Improved hand position detection with ratio calculations
+    // This makes detection more reliable across different hand sizes
     
-    // Check if thumb and index finger are not pinched together
+    // Check if index finger is extended
+    const indexExtensionY = indexFingerMCP.y - indexFingerTip.y;
+    const indexFingerLength = Math.abs(indexFingerMCP.y - indexFingerPIP.y) * 2;
+    const isIndexExtended = indexExtensionY > indexFingerLength * 0.5;
+    
+    // Check middle finger position
+    const middleExtensionY = middleFingerMCP.y - middleFingerTip.y;
+    const middleFingerLength = Math.abs(middleFingerMCP.y - middleFingerPIP.y) * 2;
+    const isMiddleExtended = middleExtensionY > middleFingerLength * 0.5;
+    
+    // Check if thumb and index finger are pinched
     const thumbIndexDistance = Math.sqrt(
       Math.pow(thumbTip.x - indexFingerTip.x, 2) + 
       Math.pow(thumbTip.y - indexFingerTip.y, 2)
     );
     
-    const isPinching = thumbIndexDistance < 0.08; // Adjusted threshold
+    // Calculate hand scale for adaptive thresholds
+    const handScale = Math.sqrt(
+      Math.pow(indexFingerMCP.x - middleFingerMCP.x, 2) + 
+      Math.pow(indexFingerMCP.y - middleFingerMCP.y, 2)
+    );
     
-    // Check middle finger position relative to its PIP joint
-    const isMiddleDown = middleFingerTip.y > middleFingerPIP.y;
+    const isPinching = thumbIndexDistance < handScale * 0.3;
     
-    // More accurate detection with hysteresis for stability
-    if (isIndexExtended && !isPinching && isMiddleDown) {
-      return GestureType.DRAWING;
+    // Determine gesture with hysteresis for stability
+    let detectedGesture = GestureType.NONE;
+    
+    if (isIndexExtended && !isMiddleExtended && !isPinching) {
+      detectedGesture = GestureType.DRAWING;
     } else if (isPinching) {
-      return GestureType.ERASING;
+      detectedGesture = GestureType.ERASING;
     }
     
-    return GestureType.NONE;
+    // Apply gesture debouncing for stability
+    if (detectedGesture !== previousGesture) {
+      // Clear existing timer
+      if (gestureDebounceTimer !== null) {
+        window.clearTimeout(gestureDebounceTimer);
+      }
+      
+      // Set new timer
+      const currentGesture = detectedGesture;
+      gestureDebounceTimer = window.setTimeout(() => {
+        previousGesture = currentGesture;
+        gestureDebounceTimer = null;
+      }, gestureDebounceDelay);
+      
+      // Return previous gesture during debounce period
+      return previousGesture;
+    }
+    
+    return detectedGesture;
   } catch (error) {
     console.error("Error detecting gesture:", error);
     return GestureType.NONE;
   }
 };
 
-// Function to initialize MediaPipe Hands in browser with improved performance
+// Function to initialize MediaPipe Hands with optimized performance settings
 export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResults: (results: any) => void) => {
   try {
-    // Check if MediaPipe is available (loaded via CDN)
+    // Check if MediaPipe is available
     if (!(window as any).Hands) {
       console.error("MediaPipe Hands is not loaded. Falling back to mock data.");
       return null;
@@ -109,11 +157,12 @@ export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResu
       }
     });
     
+    // Optimized settings for better performance
     hands.setOptions({
       maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6, // Increased for stability
-      minTrackingConfidence: 0.6,  // Increased for stability
+      modelComplexity: 1, // 0 for speed, 1 for balanced
+      minDetectionConfidence: 0.6, 
+      minTrackingConfidence: 0.6,
       selfieMode: true // Mirror the video for more intuitive drawing
     });
     
@@ -136,11 +185,11 @@ export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResu
   }
 };
 
-// Generate mock hand landmarks for testing without camera
+// Generate visually appealing mock hand landmarks for testing
 export const createMockHandLandmarks = (): HandLandmark[] => {
-  // Create a more realistic hand shape for testing
-  const baseX = 0.5 + (Math.random() * 0.2 - 0.1);
-  const baseY = 0.5 + (Math.random() * 0.2 - 0.1);
+  // Create a more realistic hand shape with smoother motion
+  const baseX = 0.5 + (Math.sin(Date.now() * 0.001) * 0.2);
+  const baseY = 0.5 + (Math.cos(Date.now() * 0.0015) * 0.2);
   
   // Wrist
   const landmarks: HandLandmark[] = [{ x: baseX, y: baseY, z: 0 }];
@@ -148,17 +197,18 @@ export const createMockHandLandmarks = (): HandLandmark[] => {
   // Thumb (4 points)
   for (let i = 0; i < 4; i++) {
     landmarks.push({
-      x: baseX - 0.05 * (i + 1),
-      y: baseY - 0.03 * (i + 1),
+      x: baseX - 0.05 * (i + 1) + (Math.sin(Date.now() * 0.002) * 0.01),
+      y: baseY - 0.03 * (i + 1) + (Math.cos(Date.now() * 0.0025) * 0.01),
       z: 0
     });
   }
   
   // Index finger (4 points)
+  const indexFingerExtended = Math.sin(Date.now() * 0.001) > 0;
   for (let i = 0; i < 4; i++) {
     landmarks.push({
-      x: baseX - 0.02,
-      y: baseY - 0.05 * (i + 1),
+      x: baseX - 0.02 + (Math.sin(Date.now() * 0.003) * 0.005),
+      y: baseY - (indexFingerExtended ? 0.1 * (i + 1) : 0.03 * (i + 1)),
       z: 0
     });
   }
@@ -166,8 +216,8 @@ export const createMockHandLandmarks = (): HandLandmark[] => {
   // Middle finger (4 points)
   for (let i = 0; i < 4; i++) {
     landmarks.push({
-      x: baseX,
-      y: baseY - 0.04 * (i + 1),
+      x: baseX + (Math.sin(Date.now() * 0.002) * 0.005),
+      y: baseY - 0.03 * (i + 1),
       z: 0
     });
   }
@@ -175,8 +225,8 @@ export const createMockHandLandmarks = (): HandLandmark[] => {
   // Ring finger (4 points)
   for (let i = 0; i < 4; i++) {
     landmarks.push({
-      x: baseX + 0.02,
-      y: baseY - 0.03 * (i + 1),
+      x: baseX + 0.02 + (Math.sin(Date.now() * 0.0015) * 0.005),
+      y: baseY - 0.025 * (i + 1),
       z: 0
     });
   }
@@ -184,16 +234,10 @@ export const createMockHandLandmarks = (): HandLandmark[] => {
   // Pinky finger (4 points)
   for (let i = 0; i < 4; i++) {
     landmarks.push({
-      x: baseX + 0.04,
+      x: baseX + 0.04 + (Math.sin(Date.now() * 0.0025) * 0.005),
       y: baseY - 0.02 * (i + 1),
       z: 0
     });
-  }
-  
-  // Randomly decide if drawing gesture
-  if (Math.random() > 0.5) {
-    // Make index finger extended for drawing gesture
-    landmarks[8].y = baseY - 0.25;
   }
   
   return landmarks;
