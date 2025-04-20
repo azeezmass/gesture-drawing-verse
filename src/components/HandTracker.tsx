@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { HandLandmark, GestureType, detectGesture, createMockHandLandmarks, initializeMediaPipe } from "@/lib/gestures";
 
 interface HandTrackerProps {
