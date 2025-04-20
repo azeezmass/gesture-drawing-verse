@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
+    "@mediapipe/hands": "file:0.4.1675469240@mediapipe/camera-utils@0.3.1675466862@mediapipe/drawing-utils@0.3.1675467019socket.io-client@4.7.5",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-aspect-ratio": "^1.1.0",

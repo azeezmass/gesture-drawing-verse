@@ -1,73 +1,89 @@
-# Welcome to your Lovable project
+# GestureVerse: Multiplayer Drawing Game using Hand Gestures
 
-## Project info
+GestureVerse is an interactive drawing game that uses hand gesture recognition to enable players to draw on a virtual canvas without traditional input devices. This project combines real-time hand tracking technology with a multiplayer game environment.
 
-**URL**: https://lovable.dev/projects/62225969-17a8-4743-aaf0-034dff041243
+## Features
 
-## How can I edit this code?
+- **Hand Gesture Drawing**: Draw on a canvas using just your hand movements
+- **Multiplayer Gameplay**: Create or join game rooms with other players
+- **Turn-Based Gameplay**: Players take turns drawing words while others guess
+- **Simple UI**: Clean, intuitive interface focused on the drawing experience
 
-There are several ways of editing your application.
+## Technologies Used
 
-**Use Lovable**
+- **React** - Frontend UI framework
+- **TypeScript** - Type-safe JavaScript
+- **MediaPipe** - Hand tracking and gesture recognition
+- **Tailwind CSS** - Styling
+- **Canvas API** - For drawing functionality
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/62225969-17a8-4743-aaf0-034dff041243) and start prompting.
+## Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
+### Prerequisites
 
-**Use your preferred IDE**
+- Modern web browser with camera access (Chrome recommended)
+- Node.js & npm installed
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Installation
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
+1. Clone the repository:
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
 git clone <YOUR_GIT_URL>
+```
 
-# Step 2: Navigate to the project directory.
+2. Navigate to the project directory:
+```sh
 cd <YOUR_PROJECT_NAME>
+```
 
-# Step 3: Install the necessary dependencies.
-npm i
+3. Install dependencies:
+```sh
+npm install
+```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+4. Start the development server:
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## How to Play
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+1. **Join or Create Room**: Enter a room name to create a new game or join with a room code
+2. **Drawing Phase**: Use your index finger to draw the given word when it's your turn
+3. **Guessing Phase**: Try to guess what other players are drawing
+4. **Score Points**: Earn points based on correct guesses and the speed of your guesses
 
-**Use GitHub Codespaces**
+## Gesture Controls
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+- **Point with Index Finger**: Draw on the canvas
+- **Pinch Index Finger & Thumb**: Erase mode (not fully implemented in demo)
+- **Close Hand**: Stop drawing (not fully implemented in demo)
 
-## What technologies are used for this project?
+## Demo Mode
 
-This project is built with:
+If you don't have a camera or experience issues with MediaPipe:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- Use the "Demo Mode" to test the game with simulated hand tracking
+- Toggle between camera and demo mode using the button in the hand tracking view
 
-## How can I deploy this project?
+## Project Structure
 
-Simply open [Lovable](https://lovable.dev/projects/62225969-17a8-4743-aaf0-034dff041243) and click on Share -> Publish.
+- `src/components/` - React components for UI
+- `src/lib/` - Core utilities and gesture recognition logic
+- `src/pages/` - Main application pages
 
-## Can I connect a custom domain to my Lovable project?
+## Future Enhancements
 
-Yes, you can!
+- Advanced gesture recognition
+- Real-time multiplayer with Socket.io or WebRTC
+- Customizable drawing tools
+- User profiles and persistent scores
+- Mobile device optimization
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Deployment
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+This project can be deployed using Vercel, Netlify, or any other React-compatible hosting service.
+
+## License
+
+This project is available under the MIT License.
