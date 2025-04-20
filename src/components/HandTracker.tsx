@@ -20,6 +20,8 @@ const HandTracker: React.FC<HandTrackerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [useMockData, setUseMockData] = useState(false);
   const [mediaPipeAvailable, setMediaPipeAvailable] = useState(false);
+  const handResultsRef = useRef<any>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Check if MediaPipe is available
   useEffect(() => {
@@ -49,13 +51,26 @@ const HandTracker: React.FC<HandTrackerProps> = ({
           video: { 
             facingMode: "user",
             width: { ideal: 640 },
-            height: { ideal: 480 }
+            height: { ideal: 480 },
+            frameRate: { ideal: 30 } // Optimized frame rate for better performance
           }
         });
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          setIsInitialized(true);
+          videoRef.current.playsInline = true; // For mobile browsers
+          videoRef.current.muted = true;
+          
+          // Wait for the video to be ready to prevent black frames
+          videoRef.current.onloadedmetadata = () => {
+            if (videoRef.current) {
+              videoRef.current.play().catch(err => {
+                console.error("Error playing video:", err);
+                setUseMockData(true);
+              });
+              setIsInitialized(true);
+            }
+          };
         }
       } catch (err) {
         console.error("Error accessing webcam:", err);
@@ -78,8 +93,92 @@ const HandTracker: React.FC<HandTrackerProps> = ({
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
+      
+      // Clean up animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
   }, [enabled, useMockData]);
+  
+  // Process MediaPipe results in a separate rendering loop for better performance
+  const processResults = useCallback(() => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const results = handResultsRef.current;
+    
+    // Draw hand landmarks if hand is detected
+    if (results && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0];
+      
+      // Convert landmarks to our format
+      const handLandmarks: HandLandmark[] = landmarks.map((lm: any) => ({
+        x: lm.x,
+        y: lm.y,
+        z: lm.z
+      }));
+      
+      // Detect gesture
+      const gesture = detectGesture(handLandmarks);
+      
+      // Draw landmarks
+      if (canvas && ctx) {
+        // Draw connection between landmarks
+        if ((window as any).drawConnectors) {
+          (window as any).drawConnectors(
+            ctx, 
+            landmarks, 
+            (window as any).HAND_CONNECTIONS,
+            { color: '#8B5CF6', lineWidth: 2 }
+          );
+        }
+        
+        // Draw landmarks
+        if ((window as any).drawLandmarks) {
+          (window as any).drawLandmarks(
+            ctx, 
+            landmarks, 
+            { 
+              color: '#D6BCFA', 
+              lineWidth: 1,
+              radius: landmark => {
+                return landmark.index === 8 ? 6 : 4; // Make index finger tip larger
+              }
+            }
+          );
+        }
+        
+        // Highlight index finger if drawing
+        if (gesture === GestureType.DRAWING && landmarks[8]) {
+          ctx.fillStyle = '#8B5CF6';
+          ctx.beginPath();
+          ctx.arc(
+            landmarks[8].x * canvas.width, 
+            landmarks[8].y * canvas.height, 
+            8, 
+            0, 
+            2 * Math.PI
+          );
+          ctx.fill();
+        }
+      }
+      
+      // Pass landmarks and gesture to parent component
+      if (onGestureDetected) {
+        onGestureDetected(handLandmarks, gesture);
+      }
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(processResults);
+  }, [onGestureDetected]);
   
   // Initialize MediaPipe if available
   useEffect(() => {
@@ -92,75 +191,10 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       
       // Process MediaPipe results
       const onResults = (results: any) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        handResultsRef.current = results;
         
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw hand landmarks if hand is detected
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-          const landmarks = results.multiHandLandmarks[0];
-          
-          // Convert landmarks to our format
-          const handLandmarks: HandLandmark[] = landmarks.map((lm: any) => ({
-            x: lm.x,
-            y: lm.y,
-            z: lm.z
-          }));
-          
-          // Detect gesture
-          const gesture = detectGesture(handLandmarks);
-          
-          // Draw landmarks
-          if (canvas && ctx) {
-            // Draw connection between landmarks
-            if ((window as any).drawConnectors) {
-              (window as any).drawConnectors(
-                ctx, 
-                landmarks, 
-                (window as any).HAND_CONNECTIONS,
-                { color: '#8B5CF6', lineWidth: 2 }
-              );
-            }
-            
-            // Draw landmarks
-            if ((window as any).drawLandmarks) {
-              (window as any).drawLandmarks(
-                ctx, 
-                landmarks, 
-                { 
-                  color: '#D6BCFA', 
-                  lineWidth: 1,
-                  radius: landmark => {
-                    return landmark.index === 8 ? 6 : 4; // Make index finger tip larger
-                  }
-                }
-              );
-            }
-            
-            // Highlight index finger if drawing
-            if (gesture === GestureType.DRAWING && landmarks[8]) {
-              ctx.fillStyle = '#8B5CF6';
-              ctx.beginPath();
-              ctx.arc(
-                landmarks[8].x * canvas.width, 
-                landmarks[8].y * canvas.height, 
-                8, 
-                0, 
-                2 * Math.PI
-              );
-              ctx.fill();
-            }
-          }
-          
-          // Pass landmarks and gesture to parent component
-          if (onGestureDetected) {
-            onGestureDetected(handLandmarks, gesture);
-          }
+        if (!animationFrameRef.current) {
+          animationFrameRef.current = requestAnimationFrame(processResults);
         }
       };
       
@@ -180,14 +214,22 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       if (mediaPipeInstance) {
         mediaPipeInstance.close();
       }
+      
+      // Clean up animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
-  }, [isInitialized, onGestureDetected, useMockData, mediaPipeAvailable, enabled]);
+  }, [isInitialized, onGestureDetected, useMockData, mediaPipeAvailable, enabled, processResults]);
   
   // Use mock data when needed
   useEffect(() => {
     if (!enabled || !useMockData) return;
     
-    const mockInterval = setInterval(() => {
+    let mockInterval: number;
+    
+    const processMockData = () => {
       const mockLandmarks = createMockHandLandmarks();
       const mockGesture = Math.random() > 0.7 ? GestureType.DRAWING : GestureType.NONE;
       
@@ -270,10 +312,21 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       if (onGestureDetected) {
         onGestureDetected(mockLandmarks, mockGesture);
       }
-    }, 100);
+    };
+    
+    // Use requestAnimationFrame instead of interval for better performance
+    const animateMock = () => {
+      processMockData();
+      animationFrameRef.current = requestAnimationFrame(animateMock);
+    };
+    
+    animationFrameRef.current = requestAnimationFrame(animateMock);
     
     return () => {
-      clearInterval(mockInterval);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
   }, [onGestureDetected, useMockData, enabled]);
   

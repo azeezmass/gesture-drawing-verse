@@ -26,6 +26,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const frameRateRef = useRef<number>(0);
+  const lastPositionRef = useRef<{x: number, y: number} | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -122,19 +123,30 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
     
-    for (let i = 1; i < points.length - 1; i++) {
-      const xc = (points[i].x + points[i + 1].x) / 2;
-      const yc = (points[i].y + points[i + 1].y) / 2;
-      
-      if (points[i].pressure) {
-        ctx.lineWidth = strokeWidth * (points[i].pressure * 1.5);
+    if (points.length === 2) {
+      ctx.lineTo(points[1].x, points[1].y);
+    } else {
+      for (let i = 0; i < points.length - 2; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (points[i].y + points[i + 1].y) / 2;
+        
+        if (points[i+1].pressure) {
+          ctx.lineWidth = strokeWidth * (points[i+1].pressure * 1.5);
+        }
+        
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
       }
       
-      ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+      const lastPoint = points[points.length - 1];
+      const secondLastPoint = points[points.length - 2];
+      ctx.quadraticCurveTo(
+        secondLastPoint.x, 
+        secondLastPoint.y, 
+        lastPoint.x, 
+        lastPoint.y
+      );
     }
     
-    const lastPoint = points[points.length - 1];
-    ctx.lineTo(lastPoint.x, lastPoint.y);
     ctx.stroke();
     
     pointsQueueRef.current = points.slice(-1);
@@ -173,7 +185,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       const indexFinger = handLandmarks[8];
       
       const rect = canvas.getBoundingClientRect();
-      const x = indexFinger.x * rect.width;
+      const x = (1 - indexFinger.x) * rect.width;
       const y = indexFinger.y * rect.height;
       
       const shouldDraw = gesture === GestureType.DRAWING;
@@ -182,15 +194,16 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         if (!isDrawing) {
           pointsQueueRef.current = [{x, y}];
           setIsDrawing(true);
+          lastPositionRef.current = {x, y};
         } else {
-          const lastPoint = pointsQueueRef.current[pointsQueueRef.current.length - 1];
+          const lastPoint = lastPositionRef.current || {x, y};
           const dx = x - lastPoint.x;
           const dy = y - lastPoint.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
           
-          if (distance > 2) {
-            if (distance > 20) {
-              const steps = Math.floor(distance / 10);
+          if (distance > 1) {
+            if (distance > 15) {
+              const steps = Math.floor(distance / 5);
               for (let i = 1; i < steps; i++) {
                 const ratio = i / steps;
                 pointsQueueRef.current.push({
@@ -201,10 +214,12 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
             }
             
             pointsQueueRef.current.push({x, y});
+            lastPositionRef.current = {x, y};
           }
         }
       } else if (isDrawing) {
         setIsDrawing(false);
+        lastPositionRef.current = null;
         
         const dpr = window.devicePixelRatio || 1;
         const imageData = ctx.getImageData(0, 0, canvas.width / dpr, canvas.height / dpr);
@@ -241,6 +256,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     
     setIsDrawing(true);
     setPrevPoint({x, y});
+    lastPositionRef.current = {x, y};
     
     canvas.setPointerCapture(e.pointerId);
   }, [isActiveDrawer, strokeColor, strokeWidth]);
@@ -255,11 +271,19 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    pointsQueueRef.current.push({
-      x, 
-      y, 
-      pressure: e.pressure > 0 ? e.pressure : undefined
-    });
+    const lastPoint = lastPositionRef.current || {x, y};
+    const dx = x - lastPoint.x;
+    const dy = y - lastPoint.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distance > 1) {
+      pointsQueueRef.current.push({
+        x, 
+        y, 
+        pressure: e.pressure > 0 ? e.pressure : undefined
+      });
+      lastPositionRef.current = {x, y};
+    }
     
     setPrevPoint({x, y});
   }, [isActiveDrawer, isDrawing]);
@@ -274,6 +298,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     if (!ctx) return;
     
     setIsDrawing(false);
+    lastPositionRef.current = null;
     
     const dpr = window.devicePixelRatio || 1;
     const imageData = ctx.getImageData(0, 0, canvas.width / dpr, canvas.height / dpr);

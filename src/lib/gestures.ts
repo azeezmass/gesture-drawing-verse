@@ -22,9 +22,9 @@ export enum GestureType {
 // Previous landmark positions for advanced smoothing
 let previousLandmarks: HandLandmark[] = [];
 let previousGesture: GestureType = GestureType.NONE;
-const smoothingFactor = 0.65; // More smoothing (higher value = more smoothing)
+const smoothingFactor = 0.5; // Less smoothing for more accuracy
 let gestureDebounceTimer: number | null = null;
-let gestureDebounceDelay = 150; // ms
+let gestureDebounceDelay = 100; // Reduced delay for more responsiveness
 
 // Enhanced smoothing with momentum consideration
 const smoothLandmarks = (landmarks: HandLandmark[]): HandLandmark[] => {
@@ -45,8 +45,8 @@ const smoothLandmarks = (landmarks: HandLandmark[]): HandLandmark[] => {
     const velocity = Math.sqrt(dx*dx + dy*dy + dz*dz);
     
     // Adjust smoothing factor based on velocity
-    // Less smoothing for fast movements to reduce lag
-    const dynSmoothing = Math.max(0.3, smoothingFactor - (velocity * 0.5));
+    // Less smoothing for fast movements to improve responsiveness
+    const dynSmoothing = Math.max(0.2, smoothingFactor - (velocity * 0.6));
     
     return {
       x: prev.x * dynSmoothing + landmark.x * (1 - dynSmoothing),
@@ -87,12 +87,12 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
     // Check if index finger is extended
     const indexExtensionY = indexFingerMCP.y - indexFingerTip.y;
     const indexFingerLength = Math.abs(indexFingerMCP.y - indexFingerPIP.y) * 2;
-    const isIndexExtended = indexExtensionY > indexFingerLength * 0.5;
+    const isIndexExtended = indexExtensionY > indexFingerLength * 0.4; // More sensitive
     
     // Check middle finger position
     const middleExtensionY = middleFingerMCP.y - middleFingerTip.y;
     const middleFingerLength = Math.abs(middleFingerMCP.y - middleFingerPIP.y) * 2;
-    const isMiddleExtended = middleExtensionY > middleFingerLength * 0.5;
+    const isMiddleExtended = middleExtensionY > middleFingerLength * 0.4; // More sensitive
     
     // Check if thumb and index finger are pinched
     const thumbIndexDistance = Math.sqrt(
@@ -106,7 +106,7 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
       Math.pow(indexFingerMCP.y - middleFingerMCP.y, 2)
     );
     
-    const isPinching = thumbIndexDistance < handScale * 0.3;
+    const isPinching = thumbIndexDistance < handScale * 0.35; // More sensitive
     
     // Determine gesture with hysteresis for stability
     let detectedGesture = GestureType.NONE;
@@ -160,10 +160,10 @@ export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResu
     // Optimized settings for better performance
     hands.setOptions({
       maxNumHands: 1,
-      modelComplexity: 1, // 0 for speed, 1 for balanced
-      minDetectionConfidence: 0.6, 
-      minTrackingConfidence: 0.6,
-      selfieMode: true // Mirror the video for more intuitive drawing
+      modelComplexity: 0, // Lower complexity for speed
+      minDetectionConfidence: 0.5, // Lower threshold for better detection
+      minTrackingConfidence: 0.5, // Lower threshold for better tracking
+      selfieMode: false // Turn off selfie mode to fix the inversion issue
     });
     
     hands.onResults(onResults);
