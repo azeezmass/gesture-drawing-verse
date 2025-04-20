@@ -1,4 +1,3 @@
-
 // MediaPipe integration for hand tracking
 
 export type HandLandmark = {
@@ -19,8 +18,35 @@ export enum GestureType {
   CLEAR = 'clear',
 }
 
-// Detect drawing gesture based on hand landmarks
-// This is a simple implementation - can be refined for more gestures
+// Previous landmark positions for smoothing
+let previousLandmarks: HandLandmark[] = [];
+const smoothingFactor = 0.7; // Adjust between 0-1 (higher = more smoothing)
+
+// Apply smoothing to hand landmarks to reduce jitter
+const smoothLandmarks = (landmarks: HandLandmark[]): HandLandmark[] => {
+  if (previousLandmarks.length === 0 || previousLandmarks.length !== landmarks.length) {
+    // First frame or landmarks count changed, just use current landmarks
+    previousLandmarks = [...landmarks];
+    return landmarks;
+  }
+  
+  // Apply smoothing
+  const smoothedLandmarks = landmarks.map((landmark, i) => {
+    const prev = previousLandmarks[i];
+    return {
+      x: prev.x * smoothingFactor + landmark.x * (1 - smoothingFactor),
+      y: prev.y * smoothingFactor + landmark.y * (1 - smoothingFactor),
+      z: prev.z * smoothingFactor + landmark.z * (1 - smoothingFactor),
+    };
+  });
+  
+  // Update previous landmarks
+  previousLandmarks = smoothedLandmarks;
+  
+  return smoothedLandmarks;
+};
+
+// Detect drawing gesture based on hand landmarks with improved sensitivity
 export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
   // If no landmarks, return NONE
   if (!landmarks || landmarks.length < 21) {
@@ -28,16 +54,20 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
   }
 
   try {
+    // Apply smoothing to reduce jitter
+    const smoothedLandmarks = smoothLandmarks(landmarks);
+    
     // Check if index finger is extended and thumb is not
     // Index finger tip is landmark 8, index finger MCP is landmark 5
     // Thumb tip is landmark 4
-    const indexFingerTip = landmarks[8];
-    const indexFingerMCP = landmarks[5];
-    const thumbTip = landmarks[4];
-    const middleFingerTip = landmarks[12];
+    const indexFingerTip = smoothedLandmarks[8];
+    const indexFingerMCP = smoothedLandmarks[5];
+    const thumbTip = smoothedLandmarks[4];
+    const middleFingerTip = smoothedLandmarks[12];
+    const middleFingerPIP = smoothedLandmarks[10]; // Middle finger PIP joint
     
     // Check if index finger is extended (tip is above MCP)
-    const isIndexExtended = indexFingerTip.y < indexFingerMCP.y;
+    const isIndexExtended = indexFingerTip.y < indexFingerMCP.y - 0.05; // Added threshold
     
     // Check if thumb and index finger are not pinched together
     const thumbIndexDistance = Math.sqrt(
@@ -45,11 +75,12 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
       Math.pow(thumbTip.y - indexFingerTip.y, 2)
     );
     
-    const isPinching = thumbIndexDistance < 0.1; // Threshold for pinch
+    const isPinching = thumbIndexDistance < 0.08; // Adjusted threshold
     
-    // Middle finger position relative to index finger
-    const isMiddleDown = middleFingerTip.y > indexFingerMCP.y;
+    // Check middle finger position relative to its PIP joint
+    const isMiddleDown = middleFingerTip.y > middleFingerPIP.y;
     
+    // More accurate detection with hysteresis for stability
     if (isIndexExtended && !isPinching && isMiddleDown) {
       return GestureType.DRAWING;
     } else if (isPinching) {
@@ -63,7 +94,7 @@ export const detectGesture = (landmarks: HandLandmark[]): GestureType => {
   }
 };
 
-// Function to initialize MediaPipe Hands in browser
+// Function to initialize MediaPipe Hands in browser with improved performance
 export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResults: (results: any) => void) => {
   try {
     // Check if MediaPipe is available (loaded via CDN)
@@ -81,8 +112,9 @@ export const initializeMediaPipe = async (videoElement: HTMLVideoElement, onResu
     hands.setOptions({
       maxNumHands: 1,
       modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
+      minDetectionConfidence: 0.6, // Increased for stability
+      minTrackingConfidence: 0.6,  // Increased for stability
+      selfieMode: true // Mirror the video for more intuitive drawing
     });
     
     hands.onResults(onResults);

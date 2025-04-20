@@ -1,5 +1,4 @@
-
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { HandLandmark, GestureType } from "@/lib/gestures";
 
 interface DrawingCanvasProps {
@@ -14,192 +13,238 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   isActiveDrawer
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [prevPoint, setPrevPoint] = useState<{ x: number; y: number } | null>(null);
   const [strokeHistory, setStrokeHistory] = useState<ImageData[]>([]);
   const [strokeColor, setStrokeColor] = useState("#000000");
   const [strokeWidth, setStrokeWidth] = useState(5);
+  
+  const animationRef = useRef<number | null>(null);
+  const pointsQueueRef = useRef<Array<{x: number, y: number}>>([]);
 
-  // Initialize canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
     if (!ctx) return;
 
-    // Set canvas to fill container
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
     
-    // Set initial canvas state
+    ctx.scale(dpr, dpr);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    
+    ctxRef.current = ctx;
   }, []);
   
-  // Handle window resize
   useEffect(() => {
     const handleResize = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       
-      // Store current drawing
-      const ctx = canvas.getContext("2d");
+      const ctx = ctxRef.current;
       if (!ctx) return;
       
       const currentDrawing = ctx.getImageData(0, 0, canvas.width, canvas.height);
       
-      // Resize canvas
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.offsetWidth * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
       
-      // Restore drawing
+      ctx.scale(dpr, dpr);
       ctx.putImageData(currentDrawing, 0, 0);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = strokeWidth;
+      ctx.imageSmoothingEnabled = true;
     };
     
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    let resizeTimer: number;
+    const debouncedResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(handleResize, 100);
+    };
+    
+    window.addEventListener("resize", debouncedResize);
+    return () => {
+      window.removeEventListener("resize", debouncedResize);
+      clearTimeout(resizeTimer);
+    };
   }, [strokeColor, strokeWidth]);
   
-  // Process hand landmarks for drawing
+  const drawPoints = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    
+    const points = pointsQueueRef.current;
+    if (points.length < 2) {
+      animationRef.current = requestAnimationFrame(drawPoints);
+      return;
+    }
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const xc = (points[i].x + points[i + 1].x) / 2;
+      const yc = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+    }
+    
+    if (points.length > 1) {
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+    
+    ctx.stroke();
+    
+    pointsQueueRef.current = [points[points.length - 1]];
+    
+    animationRef.current = requestAnimationFrame(drawPoints);
+  }, []);
+  
+  useEffect(() => {
+    if (isDrawing) {
+      animationRef.current = requestAnimationFrame(drawPoints);
+    } else if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isDrawing, drawPoints]);
+  
   useEffect(() => {
     if (!handLandmarks || !isActiveDrawer) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
     
-    // Extract index fingertip position (landmark 8)
     if (handLandmarks.length >= 9) {
       const indexFinger = handLandmarks[8];
       
-      // Convert normalized coordinates to canvas coordinates
-      const x = indexFinger.x * canvas.width;
-      const y = indexFinger.y * canvas.height;
+      const rect = canvas.getBoundingClientRect();
+      const x = indexFinger.x * rect.width;
+      const y = indexFinger.y * rect.height;
       
-      // Determine if drawing based on gesture
       const shouldDraw = gesture === GestureType.DRAWING;
       
       if (shouldDraw) {
         if (!isDrawing) {
-          // Start a new line
-          ctx.beginPath();
-          ctx.moveTo(x, y);
+          pointsQueueRef.current = [{ x, y }];
           setIsDrawing(true);
         } else {
-          // Continue the line
-          ctx.lineTo(x, y);
-          ctx.stroke();
+          pointsQueueRef.current.push({ x, y });
         }
       } else if (isDrawing) {
-        // End current stroke
-        ctx.closePath();
         setIsDrawing(false);
         
-        // Save stroke to history
-        const newStroke = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        setStrokeHistory([...strokeHistory, newStroke]);
+        const imageData = ctx.getImageData(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+        setStrokeHistory(prev => [...prev, imageData]);
+        
+        pointsQueueRef.current = [];
       }
       
       setPrevPoint({ x, y });
     }
   }, [handLandmarks, gesture, isDrawing, isActiveDrawer]);
 
-  // Mouse/touch fallback for testing
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isActiveDrawer) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
     
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+    pointsQueueRef.current = [{ x, y }];
     setIsDrawing(true);
     setPrevPoint({ x, y });
-  };
+    
+    canvas.setPointerCapture(e.pointerId);
+  }, [isActiveDrawer]);
   
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isActiveDrawer || !isDrawing) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
     
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    pointsQueueRef.current.push({ x, y });
     setPrevPoint({ x, y });
-  };
+  }, [isActiveDrawer, isDrawing]);
   
-  const handlePointerUp = () => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isActiveDrawer || !isDrawing) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
     
-    ctx.closePath();
     setIsDrawing(false);
     
-    // Save stroke to history
-    const newStroke = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setStrokeHistory([...strokeHistory, newStroke]);
-  };
+    const imageData = ctx.getImageData(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+    setStrokeHistory(prev => [...prev, imageData]);
+    
+    pointsQueueRef.current = [];
+  }, [isActiveDrawer, isDrawing]);
   
-  const clearCanvas = () => {
+  const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
     
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
     setStrokeHistory([]);
-  };
+    pointsQueueRef.current = [];
+  }, []);
   
-  const undoLastStroke = () => {
+  const undoLastStroke = useCallback(() => {
     if (strokeHistory.length === 0) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    const ctx = canvas.getContext("2d");
+    const ctx = ctxRef.current;
     if (!ctx) return;
     
     const newHistory = [...strokeHistory];
     newHistory.pop();
     setStrokeHistory(newHistory);
     
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
     
-    // Redraw remaining strokes
     if (newHistory.length > 0) {
       ctx.putImageData(newHistory[newHistory.length - 1], 0, 0);
     }
-  };
+  }, [strokeHistory]);
   
   return (
     <div className="relative w-full h-full flex flex-col">
@@ -209,7 +254,9 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerOut={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        style={{ touchAction: 'none' }}
       />
       
       {isActiveDrawer && (
