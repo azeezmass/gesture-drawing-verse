@@ -1,6 +1,10 @@
+
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { HandLandmark, GestureType } from "@/lib/gestures";
 import { useToast } from "@/hooks/use-toast";
+import { Circle, Square, Eraser, Pencil, LineIcon } from "lucide-react";
+
+export type Tool = 'draw' | 'erase' | 'line' | 'rectangle' | 'circle' | 'select';
 
 interface DrawingCanvasProps {
   handLandmarks?: HandLandmark[];
@@ -16,18 +20,15 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [prevPoint, setPrevPoint] = useState<{ x: number; y: number } | null>(null);
-  const [strokeHistory, setStrokeHistory] = useState<ImageData[]>([]);
+  const [currentTool, setCurrentTool] = useState<Tool>('draw');
   const [strokeColor, setStrokeColor] = useState("#000000");
   const [strokeWidth, setStrokeWidth] = useState(5);
   const { toast } = useToast();
   
-  const pointsQueueRef = useRef<Array<{x: number, y: number, pressure?: number}>>([]);
-  const animationFrameRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
-  const frameRateRef = useRef<number>(0);
-  const lastPositionRef = useRef<{x: number, y: number} | null>(null);
-
+  // Store starting point for shapes
+  const startPointRef = useRef<{x: number, y: number} | null>(null);
+  const lastPointRef = useRef<{x: number, y: number} | null>(null);
+  
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -41,326 +42,179 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     const ctx = canvas.getContext("2d", { 
       alpha: true, 
       desynchronized: true,
-      willReadFrequently: false
     });
     
     if (!ctx) return;
     
     ctx.scale(dpr, dpr);
-    
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
     
     ctxRef.current = ctx;
-    
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
   }, []);
 
+  // Handle drawing based on gesture type
   useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      
-      const ctx = ctxRef.current;
-      if (!ctx) return;
-      
-      const dpr = window.devicePixelRatio || 1;
-      const currentDrawing = ctx.getImageData(0, 0, canvas.width / dpr, canvas.height / dpr);
-      
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      
-      ctx.scale(dpr, dpr);
-      ctx.putImageData(currentDrawing, 0, 0);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = strokeWidth;
-      ctx.imageSmoothingEnabled = true;
-    };
-    
-    let resizeTimer: number;
-    const debouncedResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(handleResize, 100);
-    };
-    
-    window.addEventListener("resize", debouncedResize);
-    return () => {
-      window.removeEventListener("resize", debouncedResize);
-      clearTimeout(resizeTimer);
-    };
-  }, [strokeColor, strokeWidth]);
-
-  const drawPoints = useCallback((timestamp: number) => {
-    const ctx = ctxRef.current;
-    if (!ctx) {
-      animationFrameRef.current = requestAnimationFrame(drawPoints);
-      return;
-    }
-    
-    if (lastTimeRef.current) {
-      const delta = timestamp - lastTimeRef.current;
-      frameRateRef.current = 1000 / delta;
-    }
-    lastTimeRef.current = timestamp;
-    
-    const points = pointsQueueRef.current;
-    if (points.length < 2) {
-      animationFrameRef.current = requestAnimationFrame(drawPoints);
-      return;
-    }
-    
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    
-    if (points.length === 2) {
-      ctx.lineTo(points[1].x, points[1].y);
-    } else {
-      for (let i = 0; i < points.length - 2; i++) {
-        const xc = (points[i].x + points[i + 1].x) / 2;
-        const yc = (points[i].y + points[i + 1].y) / 2;
-        
-        if (points[i+1].pressure) {
-          ctx.lineWidth = strokeWidth * (points[i+1].pressure * 1.5);
-        }
-        
-        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-      }
-      
-      const lastPoint = points[points.length - 1];
-      const secondLastPoint = points[points.length - 2];
-      ctx.quadraticCurveTo(
-        secondLastPoint.x, 
-        secondLastPoint.y, 
-        lastPoint.x, 
-        lastPoint.y
-      );
-    }
-    
-    ctx.stroke();
-    
-    pointsQueueRef.current = points.slice(-1);
-    
-    animationFrameRef.current = requestAnimationFrame(drawPoints);
-  }, [strokeWidth]);
-
-  useEffect(() => {
-    if (isDrawing) {
-      if (!animationFrameRef.current) {
-        animationFrameRef.current = requestAnimationFrame(drawPoints);
-      }
-    } else if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [isDrawing, drawPoints]);
-
-  useEffect(() => {
-    if (!handLandmarks || !isActiveDrawer) return;
+    if (!handLandmarks || !isActiveDrawer || !ctxRef.current) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const ctx = ctxRef.current;
-    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
     
-    if (handLandmarks.length >= 9) {
-      const indexFinger = handLandmarks[8];
-      
-      const rect = canvas.getBoundingClientRect();
-      const x = (1 - indexFinger.x) * rect.width;
-      const y = indexFinger.y * rect.height;
-      
-      const shouldDraw = gesture === GestureType.DRAWING;
-      
-      if (shouldDraw) {
+    // Get current point from index finger
+    const indexFinger = handLandmarks[8];
+    const x = indexFinger.x * rect.width;
+    const y = indexFinger.y * rect.height;
+    
+    switch (gesture) {
+      case GestureType.DRAWING:
         if (!isDrawing) {
-          pointsQueueRef.current = [{x, y}];
+          ctx.beginPath();
+          ctx.moveTo(x, y);
           setIsDrawing(true);
-          lastPositionRef.current = {x, y};
         } else {
-          const lastPoint = lastPositionRef.current || {x, y};
-          const dx = x - lastPoint.x;
-          const dy = y - lastPoint.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          
-          if (distance > 1) {
-            if (distance > 15) {
-              const steps = Math.floor(distance / 5);
-              for (let i = 1; i < steps; i++) {
-                const ratio = i / steps;
-                pointsQueueRef.current.push({
-                  x: lastPoint.x + dx * ratio,
-                  y: lastPoint.y + dy * ratio
-                });
-              }
-            }
-            
-            pointsQueueRef.current.push({x, y});
-            lastPositionRef.current = {x, y};
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+        break;
+        
+      case GestureType.LINE:
+        if (!startPointRef.current) {
+          startPointRef.current = { x, y };
+        } else {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.drawImage(canvas, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.beginPath();
+            ctx.moveTo(startPointRef.current.x, startPointRef.current.y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
           }
         }
-      } else if (isDrawing) {
+        break;
+        
+      case GestureType.RECTANGLE:
+        if (!startPointRef.current) {
+          startPointRef.current = { x, y };
+        } else {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.drawImage(canvas, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.strokeRect(
+              startPointRef.current.x,
+              startPointRef.current.y,
+              x - startPointRef.current.x,
+              y - startPointRef.current.y
+            );
+          }
+        }
+        break;
+        
+      case GestureType.CIRCLE:
+        if (!startPointRef.current) {
+          startPointRef.current = { x, y };
+        } else {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.drawImage(canvas, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(tempCanvas, 0, 0);
+            const radius = Math.sqrt(
+              Math.pow(x - startPointRef.current.x, 2) +
+              Math.pow(y - startPointRef.current.y, 2)
+            );
+            ctx.beginPath();
+            ctx.arc(startPointRef.current.x, startPointRef.current.y, radius, 0, 2 * Math.PI);
+            ctx.stroke();
+          }
+        }
+        break;
+        
+      case GestureType.ERASING:
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, 20, 0, 2 * Math.PI);
+        ctx.clip();
+        ctx.clearRect(x - 20, y - 20, 40, 40);
+        ctx.restore();
+        break;
+        
+      case GestureType.NONE:
         setIsDrawing(false);
-        lastPositionRef.current = null;
-        
-        const dpr = window.devicePixelRatio || 1;
-        const imageData = ctx.getImageData(0, 0, canvas.width / dpr, canvas.height / dpr);
-        setStrokeHistory(prev => [...prev, imageData]);
-        
-        pointsQueueRef.current = [];
-      }
-      
-      setPrevPoint({x, y});
+        startPointRef.current = null;
+        break;
     }
-  }, [handLandmarks, gesture, isDrawing, isActiveDrawer]);
+    
+    lastPointRef.current = { x, y };
+  }, [handLandmarks, gesture, isActiveDrawer]);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isActiveDrawer) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = ctxRef.current;
-    if (!ctx) return;
-    
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    pointsQueueRef.current = [{
-      x, 
-      y, 
-      pressure: e.pressure > 0 ? e.pressure : undefined
-    }];
-    
-    setIsDrawing(true);
-    setPrevPoint({x, y});
-    lastPositionRef.current = {x, y};
-    
-    canvas.setPointerCapture(e.pointerId);
-  }, [isActiveDrawer, strokeColor, strokeWidth]);
-  
-  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isActiveDrawer || !isDrawing) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const lastPoint = lastPositionRef.current || {x, y};
-    const dx = x - lastPoint.x;
-    const dy = y - lastPoint.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance > 1) {
-      pointsQueueRef.current.push({
-        x, 
-        y, 
-        pressure: e.pressure > 0 ? e.pressure : undefined
-      });
-      lastPositionRef.current = {x, y};
-    }
-    
-    setPrevPoint({x, y});
-  }, [isActiveDrawer, isDrawing]);
-  
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isActiveDrawer || !isDrawing) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = ctxRef.current;
-    if (!ctx) return;
-    
-    setIsDrawing(false);
-    lastPositionRef.current = null;
-    
-    const dpr = window.devicePixelRatio || 1;
-    const imageData = ctx.getImageData(0, 0, canvas.width / dpr, canvas.height / dpr);
-    setStrokeHistory(prev => [...prev, imageData]);
-    
-    pointsQueueRef.current = [];
-  }, [isActiveDrawer, isDrawing]);
-  
   const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    
     const ctx = ctxRef.current;
-    if (!ctx) return;
+    if (!canvas || !ctx) return;
     
-    const dpr = window.devicePixelRatio || 1;
-    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-    setStrokeHistory([]);
-    pointsQueueRef.current = [];
-    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     toast({
       title: "Canvas cleared",
       description: "Drawing canvas has been cleared"
     });
   }, [toast]);
-  
-  const undoLastStroke = useCallback(() => {
-    if (strokeHistory.length === 0) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = ctxRef.current;
-    if (!ctx) return;
-    
-    const newHistory = [...strokeHistory];
-    newHistory.pop();
-    setStrokeHistory(newHistory);
-    
-    const dpr = window.devicePixelRatio || 1;
-    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-    
-    if (newHistory.length > 0) {
-      ctx.putImageData(newHistory[newHistory.length - 1], 0, 0);
-    }
-    
-    toast({
-      title: "Undo",
-      description: "Last stroke removed"
-    });
-  }, [strokeHistory, toast]);
-  
+
   return (
     <div className="relative w-full h-full flex flex-col">
+      <div className="flex justify-center gap-4 mb-4">
+        <button
+          onClick={() => setCurrentTool('draw')}
+          className={`p-2 rounded-md ${currentTool === 'draw' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
+        >
+          <Pencil className="w-6 h-6" />
+        </button>
+        <button
+          onClick={() => setCurrentTool('line')}
+          className={`p-2 rounded-md ${currentTool === 'line' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
+        >
+          <LineIcon className="w-6 h-6" />
+        </button>
+        <button
+          onClick={() => setCurrentTool('rectangle')}
+          className={`p-2 rounded-md ${currentTool === 'rectangle' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
+        >
+          <Square className="w-6 h-6" />
+        </button>
+        <button
+          onClick={() => setCurrentTool('circle')}
+          className={`p-2 rounded-md ${currentTool === 'circle' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
+        >
+          <Circle className="w-6 h-6" />
+        </button>
+        <button
+          onClick={() => setCurrentTool('erase')}
+          className={`p-2 rounded-md ${currentTool === 'erase' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
+        >
+          <Eraser className="w-6 h-6" />
+        </button>
+      </div>
+      
       <canvas
         ref={canvasRef}
         className="w-full flex-1 border-2 border-gray-300 rounded-lg bg-white touch-none"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onPointerLeave={handlePointerUp}
         style={{ touchAction: 'none' }}
       />
       
@@ -371,13 +225,6 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
             onClick={clearCanvas}
           >
             Clear
-          </button>
-          <button 
-            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-            onClick={undoLastStroke}
-            disabled={strokeHistory.length === 0}
-          >
-            Undo
           </button>
         </div>
       )}
