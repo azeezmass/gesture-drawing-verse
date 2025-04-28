@@ -1,8 +1,7 @@
-
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { HandLandmark, GestureType } from "@/lib/gestures";
 import { useToast } from "@/hooks/use-toast";
-import { Circle, Square, Eraser, Pencil, LineIcon } from "lucide-react";
+import { Circle, Square, Eraser, Pencil, Line } from "lucide-react";
 
 export type Tool = 'draw' | 'erase' | 'line' | 'rectangle' | 'circle' | 'select';
 
@@ -25,7 +24,6 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const [strokeWidth, setStrokeWidth] = useState(5);
   const { toast } = useToast();
   
-  // Store starting point for shapes
   const startPointRef = useRef<{x: number, y: number} | null>(null);
   const lastPointRef = useRef<{x: number, y: number} | null>(null);
   
@@ -55,7 +53,6 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     ctxRef.current = ctx;
   }, []);
 
-  // Handle drawing based on gesture type
   useEffect(() => {
     if (!handLandmarks || !isActiveDrawer || !ctxRef.current) return;
     
@@ -65,7 +62,6 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     const ctx = ctxRef.current;
     const rect = canvas.getBoundingClientRect();
     
-    // Get current point from index finger
     const indexFinger = handLandmarks[8];
     const x = indexFinger.x * rect.width;
     const y = indexFinger.y * rect.height;
@@ -190,7 +186,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
           onClick={() => setCurrentTool('line')}
           className={`p-2 rounded-md ${currentTool === 'line' ? 'bg-purple-500 text-white' : 'bg-gray-200'}`}
         >
-          <LineIcon className="w-6 h-6" />
+          <Line className="w-6 h-6" />
         </button>
         <button
           onClick={() => setCurrentTool('rectangle')}

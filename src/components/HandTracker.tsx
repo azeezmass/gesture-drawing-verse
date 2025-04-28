@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { HandLandmark, GestureType, detectGesture, createMockHandLandmarks, initializeMediaPipe } from "@/lib/gestures";
 
@@ -23,9 +22,7 @@ const HandTracker: React.FC<HandTrackerProps> = ({
   const handResultsRef = useRef<any>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Check if MediaPipe is available
   useEffect(() => {
-    // Check if MediaPipe is loaded from CDN
     const isMediaPipeAvailable = !!(window as any).Hands;
     setMediaPipeAvailable(isMediaPipeAvailable);
     
@@ -35,7 +32,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     }
   }, []);
   
-  // Initialize camera
   useEffect(() => {
     if (!enabled) return;
     
@@ -61,7 +57,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
           videoRef.current.playsInline = true; // For mobile browsers
           videoRef.current.muted = true;
           
-          // Wait for the video to be ready to prevent black frames
           videoRef.current.onloadedmetadata = () => {
             if (videoRef.current) {
               videoRef.current.play().catch(err => {
@@ -75,7 +70,7 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       } catch (err) {
         console.error("Error accessing webcam:", err);
         setError(`Camera error: ${err instanceof Error ? err.message : String(err)}`);
-        setUseMockData(true); // Fall back to mock data
+        setUseMockData(true);
       } finally {
         setIsLoading(false);
       }
@@ -88,13 +83,11 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     }
     
     return () => {
-      // Clean up camera stream
       if (videoRef.current?.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
       
-      // Clean up animation frame
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -102,7 +95,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     };
   }, [enabled, useMockData]);
   
-  // Process MediaPipe results in a separate rendering loop for better performance
   const processResults = useCallback(() => {
     if (!canvasRef.current) return;
     
@@ -110,28 +102,22 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     const results = handResultsRef.current;
     
-    // Draw hand landmarks if hand is detected
     if (results && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
       
-      // Convert landmarks to our format
       const handLandmarks: HandLandmark[] = landmarks.map((lm: any) => ({
         x: lm.x,
         y: lm.y,
         z: lm.z
       }));
       
-      // Detect gesture
-      const gesture = detectGesture(handLandmarks);
+      const gesture = detectGesture(handLandmarks, 'draw');
       
-      // Draw landmarks
       if (canvas && ctx) {
-        // Draw connection between landmarks
         if ((window as any).drawConnectors) {
           (window as any).drawConnectors(
             ctx, 
@@ -141,7 +127,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
           );
         }
         
-        // Draw landmarks
         if ((window as any).drawLandmarks) {
           (window as any).drawLandmarks(
             ctx, 
@@ -150,13 +135,12 @@ const HandTracker: React.FC<HandTrackerProps> = ({
               color: '#D6BCFA', 
               lineWidth: 1,
               radius: landmark => {
-                return landmark.index === 8 ? 6 : 4; // Make index finger tip larger
+                return landmark.index === 8 ? 6 : 4;
               }
             }
           );
         }
         
-        // Highlight index finger if drawing
         if (gesture === GestureType.DRAWING && landmarks[8]) {
           ctx.fillStyle = '#8B5CF6';
           ctx.beginPath();
@@ -171,7 +155,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
         }
       }
       
-      // Pass landmarks and gesture to parent component
       if (onGestureDetected) {
         onGestureDetected(handLandmarks, gesture);
       }
@@ -180,7 +163,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     animationFrameRef.current = requestAnimationFrame(processResults);
   }, [onGestureDetected]);
   
-  // Initialize MediaPipe if available
   useEffect(() => {
     if (!enabled || !isInitialized || useMockData || !mediaPipeAvailable || !videoRef.current) return;
     
@@ -189,7 +171,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     const initMediaPipe = async () => {
       if (!videoRef.current) return;
       
-      // Process MediaPipe results
       const onResults = (results: any) => {
         handResultsRef.current = results;
         
@@ -210,12 +191,10 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     initMediaPipe();
     
     return () => {
-      // Clean up MediaPipe
       if (mediaPipeInstance) {
         mediaPipeInstance.close();
       }
       
-      // Clean up animation frame
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -223,7 +202,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     };
   }, [isInitialized, onGestureDetected, useMockData, mediaPipeAvailable, enabled, processResults]);
   
-  // Use mock data when needed
   useEffect(() => {
     if (!enabled || !useMockData) return;
     
@@ -233,35 +211,31 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       const mockLandmarks = createMockHandLandmarks();
       const mockGesture = Math.random() > 0.7 ? GestureType.DRAWING : GestureType.NONE;
       
-      // Draw mock hand visualization
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           
-          // Draw hand landmarks
           mockLandmarks.forEach((landmark, i) => {
             ctx.fillStyle = i === 8 && mockGesture === GestureType.DRAWING 
-              ? '#8B5CF6' // Purple for index finger when drawing
-              : '#D6BCFA'; // Light purple for other landmarks
-              
+              ? '#8B5CF6'
+              : '#D6BCFA';
+            
             ctx.beginPath();
             ctx.arc(
               landmark.x * canvas.width, 
               landmark.y * canvas.height, 
-              i === 8 ? 6 : 4, // Make index finger tip larger
+              i === 8 ? 6 : 4,
               0, 
               2 * Math.PI
             );
             ctx.fill();
           });
           
-          // Draw lines connecting landmarks
           ctx.strokeStyle = '#8B5CF6';
           ctx.lineWidth = 2;
           
-          // Connect thumb (0-4)
           for (let i = 1; i <= 4; i++) {
             ctx.beginPath();
             ctx.moveTo(
@@ -275,7 +249,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
             ctx.stroke();
           }
           
-          // Connect fingers to palm
           for (let finger = 1; finger <= 5; finger++) {
             const baseIndex = finger === 1 ? 0 : (finger - 1) * 4 + 1;
             ctx.beginPath();
@@ -290,7 +263,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
             ctx.stroke();
           }
           
-          // Connect finger segments
           for (let finger = 2; finger <= 5; finger++) {
             const startIndex = (finger - 1) * 4 + 1;
             for (let segment = 0; segment < 3; segment++) {
@@ -314,7 +286,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       }
     };
     
-    // Use requestAnimationFrame instead of interval for better performance
     const animateMock = () => {
       processMockData();
       animationFrameRef.current = requestAnimationFrame(animateMock);
@@ -330,7 +301,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
     };
   }, [onGestureDetected, useMockData, enabled]);
   
-  // Handle canvas resize
   useEffect(() => {
     const updateCanvasSize = () => {
       const canvas = canvasRef.current;
@@ -342,20 +312,16 @@ const HandTracker: React.FC<HandTrackerProps> = ({
       }
     };
     
-    // Initialize canvas size
     updateCanvasSize();
     
-    // Update on resize
     window.addEventListener('resize', updateCanvasSize);
     return () => window.removeEventListener('resize', updateCanvasSize);
   }, []);
   
-  // Toggle between real and mock data
   const toggleMode = () => {
     setUseMockData(!useMockData);
-    setIsInitialized(false); // Reset so camera reinitializes
+    setIsInitialized(false);
     
-    // If switching to camera mode, clear error
     if (useMockData) {
       setError(null);
     }
@@ -364,7 +330,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
   return (
     <div className="relative w-full h-full">
       <div className={`relative rounded-lg overflow-hidden h-full ${isLoading ? 'animate-pulse bg-gray-300' : ''}`}>
-        {/* Video element (hidden when using mock data) */}
         <video
           ref={videoRef}
           className={`absolute inset-0 w-full h-full object-cover ${useMockData ? 'hidden' : ''}`}
@@ -373,7 +338,6 @@ const HandTracker: React.FC<HandTrackerProps> = ({
           muted
         />
         
-        {/* Canvas overlay for drawing landmarks */}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full z-10"
@@ -401,14 +365,12 @@ const HandTracker: React.FC<HandTrackerProps> = ({
           </div>
         )}
         
-        {/* Mode indicator */}
         <div className="absolute top-2 right-2 z-30">
           <span className={`text-xs px-2 py-1 rounded ${useMockData ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'}`}>
             {useMockData ? 'Demo Mode' : 'Camera Mode'}
           </span>
         </div>
         
-        {/* Mode toggle button */}
         <div className="absolute top-2 left-2 z-30">
           <button
             onClick={toggleMode}
